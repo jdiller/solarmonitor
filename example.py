@@ -18,6 +18,13 @@ _LOGGER = logging.getLogger(__name__)
 
 VAR = {}
 
+class LoggingClientSession(aiohttp.ClientSession):
+    async def _request(self, method, url, **kwargs):
+        _LOGGER.debug('Starting request <%s %r>', method, url)
+        _LOGGER.debug(kwargs)
+        result = await super()._request(method, url, **kwargs)
+        _LOGGER.debug('Completed request <%s %r>\nResult %s', method, url, result.text)
+        return result
 
 def print_table(sensors):
     for sen in sensors:
@@ -29,8 +36,8 @@ def print_table(sensors):
 
 async def main_loop(loop, password, user, ip):  # pylint: disable=invalid-name
     """Main loop."""
-    async with aiohttp.ClientSession(loop=loop,
-                                     connector=aiohttp.TCPConnector(verify_ssl=False)) as session:
+    async with LoggingClientSession(loop=loop,
+                          connector=aiohttp.TCPConnector(verify_ssl=False)) as session:
         VAR["sma"] = pysma.SMA(session, ip, password=password, group=user)
         await VAR["sma"].new_session()
         if VAR["sma"].sma_sid is None:

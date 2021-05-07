@@ -121,8 +121,10 @@ class Sensors:
     """SMA Sensors."""
 
     def __init__(self, add_default_sensors=True):
+        _LOGGER.debug("New Sensors")
         self.__s = []
         if add_default_sensors:
+            _LOGGER.debug("Adding default sensors")
             self.add(
                 (
                     # AC side - Grid measurements
@@ -172,6 +174,7 @@ class Sensors:
                     ),
                 )
             )
+            _LOGGER.debug("Sensors added")
 
     def __len__(self):
         """Length."""
@@ -197,9 +200,11 @@ class Sensors:
         return self.__s.__iter__()
 
     def add(self, sensor):
+        _LOGGER.debug("Adding %s", sensor)
         """Add a sensor, warning if it exists."""
         if isinstance(sensor, (list, tuple)):
             for sss in sensor:
+                _LOGGER.debug("Adding subsensor %s", sss)
                 self.add(sss)
             return
 
@@ -277,14 +282,15 @@ class SMA:
         """Fetch json data for requests."""
         params = {
             "data": json.dumps(payload),
-            "headers": {"content-type": "application/json"},
+            "headers": {"Content-Type": "application/json", "Accept": "application/json, text/plain, */*"},
             "params": {"sid": self.sma_sid} if self.sma_sid else None,
         }
         for _ in range(3):
             try:
                 with async_timeout.timeout(10):
                     res = await self._aio_session.post(self._url + url, **params)
-                    return (await res.json()) or {}
+                    result_dict = await res.json() or {} 
+                    return result_dict
             except (asyncio.TimeoutError, client_exceptions.ClientError):
                 continue
         return {"err": "Could not connect to SMA at {} (timeout)".format(self._url)}
