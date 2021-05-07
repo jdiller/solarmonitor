@@ -62,7 +62,7 @@ async def main_loop(loop, password, user, ip):  # pylint: disable=invalid-name
 
 def main():
     """Main example."""
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    logging.basicConfig(stream=sys.stdout, level=logging.ERROR)
 
     parser = argparse.ArgumentParser(description="Test the SMA webconnect library.")
     parser.add_argument("ip", type=str, help="IP address of the Webconnect module")
