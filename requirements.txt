@@ -1,0 +1,15 @@
+aiohttp==3.7.4.post0
+async-timeout==3.0.1
+asyncio==3.4.3
+attrs==21.2.0
+certifi==2020.12.5
+chardet==4.0.0
+datadog==0.41.0
+decorator==5.0.7
+idna==2.10
+jmespath==0.10.0
+multidict==5.1.0
+requests==2.25.1
+typing-extensions==3.10.0.0
+urllib3==1.26.4
+yarl==1.6.3

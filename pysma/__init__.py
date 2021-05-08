@@ -248,7 +248,7 @@ class SMA:
             self._new_session_data = {"right": USERS[group], "pass": password}
         self._url = url.rstrip("/")
         if not url.startswith("http"):
-            self._url = "http://" + self._url
+            self._url = "https://" + self._url
         self._aio_session = session
         self.sma_sid = None
         self.sma_uid = uid

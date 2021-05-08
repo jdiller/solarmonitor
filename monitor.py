@@ -1,18 +1,13 @@
 #!/usr/bin/env python
-"""Basic usage example and testing of pysma."""
-import argparse
 import asyncio
 import logging
 import signal
 import sys
-
 import aiohttp
-
+import datadog
 import pysma
+from configparser import ConfigParser
 
-# This module will work with Python 3.5+
-# Python 3.4+ "@asyncio.coroutine" decorator
-# Python 3.5+ uses "async def f()" syntax
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,12 +21,12 @@ class LoggingClientSession(aiohttp.ClientSession):
         _LOGGER.debug('Completed request <%s %r>\nResult %s', method, url, result.text)
         return result
 
-def print_table(sensors):
+def send_values(sensors):
     for sen in sensors:
-        if sen.value is None:
-            print("{:>25}".format(sen.name))
-        else:
-            print("{:>25}{:>15} {}".format(sen.name, str(sen.value), sen.unit))
+        if sen.value is not None:
+            _LOGGER.debug("{:>25}{:>15} {}".format(sen.name, str(sen.value), sen.unit))
+            datadog.statsd.histogram(sen.name, sen.value, tags=['environment:house'])
+
 
 
 async def main_loop(loop, password, user, ip):  # pylint: disable=invalid-name
@@ -47,14 +42,14 @@ async def main_loop(loop, password, user, ip):  # pylint: disable=invalid-name
         _LOGGER.info("NEW SID: %s", VAR["sma"].sma_sid)
 
         VAR["running"] = True
-        cnt = 5
+        cnt = 50
         sensors = pysma.Sensors()
         while VAR.get("running"):
             await VAR["sma"].read(sensors)
-            print_table(sensors)
+            send_values(sensors)
             cnt -= 1
-            if cnt == 0:
-                break
+            #if cnt == 0:
+            #    break
             await asyncio.sleep(2)
 
         await VAR["sma"].close_session()
@@ -62,14 +57,28 @@ async def main_loop(loop, password, user, ip):  # pylint: disable=invalid-name
 
 def main():
     """Main example."""
-    logging.basicConfig(stream=sys.stdout, level=logging.ERROR)
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
-    parser = argparse.ArgumentParser(description="Test the SMA webconnect library.")
-    parser.add_argument("ip", type=str, help="IP address of the Webconnect module")
-    parser.add_argument("user", help="installer/user")
-    parser.add_argument("password", help="Installer password")
+    config = ConfigParser()
+    try:
+        config.read("config.ini")
+    except:
+        print("Can't read config.ini")
+        sys.exit(1)
 
-    args = parser.parse_args()
+    ip = config.get('solar', 'ip')
+    password = config.get('solar', 'password')
+    
+    ddog_api_key = config.get('datadog', 'api_key')
+    ddog_app_key = config.get('datadog', 'app_key')
+    ddog_options = { 
+            'api_key' : ddog_api_key,
+            'app_key' : ddog_app_key,
+            'statsd_host': '127.0.0.1',
+            'statsd_port': 8125
+    }
+
+    datadog.initialize(**ddog_options)
 
     loop = asyncio.get_event_loop()
 
@@ -81,7 +90,7 @@ def main():
     # loop.add_signal_handler(signal.SIGINT, shutdown)
     # signal.signal(signal.SIGINT, signal.SIG_DFL)
     loop.run_until_complete(
-        main_loop(loop, user=args.user, password=args.password, ip=args.ip)
+        main_loop(loop, user='user', password=password, ip=ip)
     )
 
 
