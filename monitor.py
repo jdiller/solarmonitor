@@ -6,6 +6,9 @@ import sys
 import aiohttp
 import datadog
 import pysma
+import numbers
+import time
+
 from configparser import ConfigParser
 
 
@@ -25,7 +28,10 @@ def send_values(sensors):
     for sen in sensors:
         if sen.value is not None:
             _LOGGER.debug("{:>25}{:>15} {}".format(sen.name, str(sen.value), sen.unit))
-            datadog.statsd.histogram(sen.name, sen.value, tags=['environment:house'])
+            if isinstance(sen.value, numbers.Number):
+                datadog.statsd.histogram(sen.name, sen.value, tags=['environment:house'])
+            else:
+                _LOGGER.debug("Not sending non-numeric sensor '{}'", sen.name)
 
 
 
@@ -34,7 +40,17 @@ async def main_loop(loop, password, user, ip):  # pylint: disable=invalid-name
     async with LoggingClientSession(loop=loop,
                           connector=aiohttp.TCPConnector(verify_ssl=False)) as session:
         VAR["sma"] = pysma.SMA(session, ip, password=password, group=user)
-        await VAR["sma"].new_session()
+        back_off = 1
+        retries = 0
+        MAX_RETRIES = 10
+        while VAR["sma"].sma_sid is None and retries < MAX_RETRIES:
+            try:
+                await VAR["sma"].new_session()
+            except:
+                _LOGGER.error("Failed to create session. Waiting {} seconds.".format(back_off))
+                time.sleep(back_off)
+                retries += 1
+                back_off *= 2
         if VAR["sma"].sma_sid is None:
             _LOGGER.info("No session ID")
             return
@@ -46,6 +62,10 @@ async def main_loop(loop, password, user, ip):  # pylint: disable=invalid-name
         sensors = pysma.Sensors()
         while VAR.get("running"):
             await VAR["sma"].read(sensors)
+            # make sure there's always something in grid_power, assume 0 if it's missing
+            if sensors['grid_power'].value is None:
+                _LOGGER.info("Forcing a zero value for 'grid_power' metric.")
+                sensors['grid_power'] = 0
             send_values(sensors)
             cnt -= 1
             #if cnt == 0:
@@ -56,8 +76,8 @@ async def main_loop(loop, password, user, ip):  # pylint: disable=invalid-name
 
 
 def main():
-    """Main example."""
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    logging.basicConfig(format='%(asctime)s %(levelname)s {%(module)s} [%(funcName)s] %(message)s',
+                           datefmt='%Y-%m-%d,%H:%M:%S', stream=sys.stdout, level=logging.INFO)
 
     config = ConfigParser()
     try:
@@ -68,7 +88,7 @@ def main():
 
     ip = config.get('solar', 'ip')
     password = config.get('solar', 'password')
-    
+
     ddog_api_key = config.get('datadog', 'api_key')
     ddog_app_key = config.get('datadog', 'app_key')
     ddog_options = { 
