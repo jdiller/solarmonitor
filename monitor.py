@@ -14,7 +14,8 @@ from configparser import ConfigParser
 
 _LOGGER = logging.getLogger(__name__)
 
-VAR = {}
+sma = None
+running = False
 
 class LoggingClientSession(aiohttp.ClientSession):
     async def _request(self, method, url, **kwargs):
@@ -25,13 +26,16 @@ class LoggingClientSession(aiohttp.ClientSession):
         return result
 
 def send_values(sensors):
+    datadog.statsd.gauge("solar_alive", 1, tags=['environment:house'])
     for sen in sensors:
         if sen.value is not None:
             _LOGGER.debug("{:>25}{:>15} {}".format(sen.name, str(sen.value), sen.unit))
             if isinstance(sen.value, numbers.Number):
+                if sen.name == 'grid_power':
+                    datadog.statsd.gauge('generating', sen.value, tags=['environment:house'])
                 datadog.statsd.histogram(sen.name, sen.value, tags=['environment:house'])
             else:
-                _LOGGER.debug("Not sending non-numeric sensor '{}'", sen.name)
+                _LOGGER.debug("Not sending non-numeric sensor '{}'".format(sen.name))
 
 
 
@@ -39,45 +43,39 @@ async def main_loop(loop, password, user, ip):  # pylint: disable=invalid-name
     """Main loop."""
     async with LoggingClientSession(loop=loop,
                           connector=aiohttp.TCPConnector(verify_ssl=False)) as session:
-        VAR["sma"] = pysma.SMA(session, ip, password=password, group=user)
+        global sma
+        global running
+        sma = pysma.SMA(session, ip, password=password, group=user)
         back_off = 1
         retries = 0
-        MAX_RETRIES = 10
-        while VAR["sma"].sma_sid is None and retries < MAX_RETRIES:
+        MAX_RETRIES = 5
+        while retries < MAX_RETRIES and not running:
             try:
-                await VAR["sma"].new_session()
+                running = True
+                await sma.new_session()
             except:
                 _LOGGER.error("Failed to create session. Waiting {} seconds.".format(back_off))
+                running = False
                 time.sleep(back_off)
                 retries += 1
                 back_off *= 2
-        if VAR["sma"].sma_sid is None:
-            _LOGGER.info("No session ID")
-            return
 
-        _LOGGER.info("NEW SID: %s", VAR["sma"].sma_sid)
+        if running:
+            sensors = await sma.get_sensors()
+        while running:
+            await sma.read(sensors)
+            if not 'grid_power' in sensors or sensors['grid_power'] is None:
+                _LOGGER.warning("No value for 'grid_power'. You might get paged.")
 
-        VAR["running"] = True
-        cnt = 50
-        sensors = pysma.Sensors()
-        while VAR.get("running"):
-            await VAR["sma"].read(sensors)
-            # make sure there's always something in grid_power, assume 0 if it's missing
-            if sensors['grid_power'].value is None:
-                _LOGGER.info("Forcing a zero value for 'grid_power' metric.")
-                sensors['grid_power'] = 0
             send_values(sensors)
-            cnt -= 1
-            #if cnt == 0:
-            #    break
             await asyncio.sleep(2)
 
-        await VAR["sma"].close_session()
+        await sma.close_session()
 
 
 def main():
     logging.basicConfig(format='%(asctime)s %(levelname)s {%(module)s} [%(funcName)s] %(message)s',
-                           datefmt='%Y-%m-%d,%H:%M:%S', stream=sys.stdout, level=logging.INFO)
+                           datefmt='%Y-%m-%d,%H:%M:%S', stream=sys.stdout, level=logging.WARNING)
 
     config = ConfigParser()
     try:
@@ -103,7 +101,7 @@ def main():
     loop = asyncio.get_event_loop()
 
     def _shutdown(*_):
-        VAR["running"] = False
+        running = False
         # asyncio.ensure_future(sma.close_session(), loop=loop)
 
     signal.signal(signal.SIGINT, _shutdown)
